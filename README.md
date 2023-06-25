@@ -28,11 +28,17 @@ python chatbot_train.py
 Once the model is trained, you can use it to generate responses to input questions. A simple runtime example can be performed as follows:
 
 from chatbot_model import Seq2Seq
+
 from chatbot_train import generate_response, word2idx, idx2word, device
+
 model = Seq2Seq(input_dim=len(word2idx), output_dim=len(word2idx), emb_dim=256, hid_dim=512, n_layers=1, dropout=0.5).to(device)
+
 model.load_state_dict(torch.load("model.pt"))
+
 sample_question = "Hello, how are you?"
+
 response = generate_response(model, sample_question)
+
 print(response)
 
 
