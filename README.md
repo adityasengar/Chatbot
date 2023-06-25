@@ -10,6 +10,7 @@ chatbot_train.py: This file trains the Seq2Seq model on a set of question-answer
 
 The chatbot is trained using a simple method where each question-answer pair is processed independently (i.e., the batch size is 1).
 
+
 Requirements
 Python 3.7 or later
 PyTorch 1.7 or later
