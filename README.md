@@ -1,5 +1,5 @@
 # Simple Seq2Seq Chatbot using NLTK
-This repository contains a simple chatbot implemented using Seq2Seq model in PyTorch. The chatbot uses a very basic sequence-to-sequence model architecture without attention mechanism. It's designed for educational purposes and not intended for production use.
+This repository contains a simple chatbot implemented using Seq2Seq model in PyTorch. The chatbot uses a very basic sequence-to-sequence model architecture without attention mechanism. This is a simplified version of a chatbot model I created for a client. 
 
 Description
 The chatbot implementation consists of two main files:
