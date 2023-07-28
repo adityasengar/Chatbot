@@ -1,0 +1,22 @@
+[
+    {
+        "question": "Hello",
+        "answer": "Hi there!"
+    },
+    {
+        "question": "How are you doing?",
+        "answer": "I'm doing great."
+    },
+    {
+        "question": "What's your name?",
+        "answer": "I'm a bot."
+    },
+    {
+        "question": "What is your favorite color?",
+        "answer": "Blue."
+    },
+    {
+        "question": "Who created you?",
+        "answer": "I was created by a developer using PyTorch."
+    }
+]
