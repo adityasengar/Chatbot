@@ -1,126 +1,61 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import random
+import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ------------------------------------------------------------------
-# Model Definition with Attention
+# Transformer Model Definition
 # ------------------------------------------------------------------
 
-class Encoder(nn.Module):
-    def __init__(self, input_size, embedding_dim, hidden_size, num_layers, dropout):
-        super().__init__()
-        self.hidden_size = hidden_size
-        self.embedding = nn.Embedding(input_size, embedding_dim)
-        self.rnn = nn.LSTM(embedding_dim, hidden_size, num_layers, dropout=dropout, bidirectional=True)
-        self.fc = nn.Linear(hidden_size * 2, hidden_size)
-        
-    def forward(self, src):
-        # src = [src len, batch size]
-        embedded = self.embedding(src)
-        # embedded = [src len, batch size, emb dim]
-        
-        outputs, (hidden, cell) = self.rnn(embedded)
-        # outputs = [src len, batch size, hid dim * num directions]
-        # hidden = [num layers * num directions, batch size, hid dim]
-        # cell = [num layers * num directions, batch size, hid dim]
+class PositionalEncoding(nn.Module):
+    def __init__(self, emb_size: int, dropout: float, maxlen: int = 5000):
+        super(PositionalEncoding, self).__init__()
+        den = torch.exp(-torch.arange(0, emb_size, 2) * math.log(10000) / emb_size)
+        pos = torch.arange(0, maxlen).reshape(maxlen, 1)
+        pos_embedding = torch.zeros((maxlen, emb_size))
+        pos_embedding[:, 0::2] = torch.sin(pos * den)
+        pos_embedding[:, 1::2] = torch.cos(pos * den)
+        pos_embedding = pos_embedding.unsqueeze(-2)
 
-        # Pass the concatenated final forward and backward hidden states through a linear layer
-        hidden = torch.tanh(self.fc(torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1)))
-        
-        return outputs, hidden.unsqueeze(0)
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('pos_embedding', pos_embedding)
 
+    def forward(self, token_embedding):
+        return self.dropout(token_embedding + self.pos_embedding[:token_embedding.size(0), :])
 
-class Attention(nn.Module):
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.attn = nn.Linear((hidden_size * 2) + hidden_size, hidden_size)
-        self.v = nn.Linear(hidden_size, 1, bias=False)
+class TokenEmbedding(nn.Module):
+    def __init__(self, vocab_size: int, emb_size):
+        super(TokenEmbedding, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_size)
+        self.emb_size = emb_size
 
-    def forward(self, hidden, encoder_outputs):
-        # hidden = [1, batch size, hid dim]
-        # encoder_outputs = [src len, batch size, hid dim * 2]
-        
-        batch_size = encoder_outputs.shape[1]
-        src_len = encoder_outputs.shape[0]
-        
-        # Repeat decoder hidden state src_len times
-        hidden = hidden.repeat(src_len, 1, 1)
-        
-        energy = torch.tanh(self.attn(torch.cat((hidden, encoder_outputs), dim=2)))
-        # energy = [src len, batch size, hid dim]
+    def forward(self, tokens):
+        return self.embedding(tokens.long()) * math.sqrt(self.emb_size)
 
-        attention = self.v(energy).squeeze(2)
-        # attention = [src len, batch size]
-        
-        return F.softmax(attention, dim=0)
+class TransformerModel(nn.Module):
+    def __init__(self, num_encoder_layers: int, num_decoder_layers: int, emb_size: int, nhead: int,
+                 src_vocab_size: int, tgt_vocab_size: int, dim_feedforward: int = 512, dropout: float = 0.1):
+        super(TransformerModel, self).__init__()
+        self.transformer = nn.Transformer(d_model=emb_size, nhead=nhead, num_encoder_layers=num_encoder_layers,
+                                          num_decoder_layers=num_decoder_layers, dim_feedforward=dim_feedforward,
+                                          dropout=dropout)
+        self.generator = nn.Linear(emb_size, tgt_vocab_size)
+        self.src_tok_emb = TokenEmbedding(src_vocab_size, emb_size)
+        self.tgt_tok_emb = TokenEmbedding(tgt_vocab_size, emb_size)
+        self.positional_encoding = PositionalEncoding(emb_size, dropout=dropout)
 
+    def forward(self, src, trg, src_mask, tgt_mask, src_padding_mask, tgt_padding_mask, memory_key_padding_mask):
+        src_emb = self.positional_encoding(self.src_tok_emb(src))
+        tgt_emb = self.positional_encoding(self.tgt_tok_emb(trg))
+        
+        outs = self.transformer(src_emb, tgt_emb, src_mask, tgt_mask, None,
+                                src_padding_mask, tgt_padding_mask, memory_key_padding_mask)
+        
+        return self.generator(outs)
 
-class Decoder(nn.Module):
-    def __init__(self, input_size, embedding_dim, hidden_size, output_size, num_layers, dropout, attention):
-        super().__init__()
-        self.attention = attention
-        self.embedding = nn.Embedding(input_size, embedding_dim)
-        self.rnn = nn.LSTM((hidden_size * 2) + embedding_dim, hidden_size, num_layers, dropout=dropout)
-        self.fc = nn.Linear((hidden_size * 2) + hidden_size + embedding_dim, output_size)
-        
-    def forward(self, src, hidden, encoder_outputs, cell_state): # Added cell_state
-        src = src.unsqueeze(0)
-        # src = [1, batch size]
-        
-        embedded = self.embedding(src)
-        # embedded = [1, batch size, emb dim]
-        
-        a = self.attention(hidden, encoder_outputs).unsqueeze(1)
-        # a = [src len, batch size, 1]
-        
-        encoder_outputs = encoder_outputs.permute(1, 0, 2)
-        # encoder_outputs = [batch size, src len, hid dim * 2]
-        
-        weighted = torch.bmm(a.permute(1, 2, 0), encoder_outputs).permute(1, 0, 2)
-        # weighted = [1, batch size, hid dim * 2]
-        
-        rnn_input = torch.cat((embedded, weighted), dim=2)
-        # rnn_input = [1, batch size, (hid dim * 2) + emb dim]
-        
-        output, (hidden, cell) = self.rnn(rnn_input, (hidden, cell_state)) # Use cell_state
-        
-        prediction = self.fc(torch.cat((output.squeeze(0), weighted.squeeze(0), embedded.squeeze(0)), dim=1))
-        
-        return prediction, hidden, cell
+    def encode(self, src, src_mask):
+        return self.transformer.encoder(self.positional_encoding(self.src_tok_emb(src)), src_mask)
 
-
-class Seq2Seq(nn.Module):
-    def __init__(self, encoder, decoder):
-        super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        
-    def forward(self, src, trg, teacher_forcing_ratio=0.5):
-        batch_size = src.shape[1]
-        trg_len = trg.shape[0]
-        trg_vocab_size = self.decoder.fc.out_features
-        
-        outputs = torch.zeros(trg_len, batch_size, trg_vocab_size).to(device)
-        
-        encoder_outputs, hidden = self.encoder(src)
-        
-        # First input to the decoder is the <SOS> token
-        input = trg[0, :]
-        
-        # The first cell state for the decoder is the final cell state of the encoder
-        # Since the encoder is bidirectional, we need to handle this. For simplicity, we'll initialize it to zeros.
-        cell = torch.zeros(hidden.shape).to(device)
-        
-        for t in range(1, trg_len):
-            output, hidden, cell = self.decoder(input, hidden, encoder_outputs, cell)
-            outputs[t] = output
-            
-            teacher_force = random.random() < teacher_forcing_ratio
-            top1 = output.argmax(1)
-            
-            input = trg[t] if teacher_force else top1
-            
-        return outputs
+    def decode(self, tgt, memory, tgt_mask):
+        return self.transformer.decoder(self.positional_encoding(self.tgt_tok_emb(tgt)), memory, tgt_mask)
