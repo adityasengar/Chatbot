@@ -76,3 +76,4 @@ This is the most effective model in the repository.
     After training, the script will automatically drop into an example inference session. You can modify the script to create a standalone interactive chat application.
 
 ```
+# Updated on 2026-01-09
